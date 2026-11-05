@@ -46,3 +46,4 @@ re-run on subsequent deploys):
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/service.yaml
 ```
+

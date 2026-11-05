@@ -1,0 +1,28 @@
+# Version control / IDE
+.git
+.idea
+.vscode
+
+# Documentation (not needed to run the app)
+*.md
+
+# Infrastructure folders (not part of the Docker image)
+k8s
+ansible
+infra
+jenkins
+Jenkinsfile
+.gitleaks.toml
+
+# Source code — only the compiled jar is needed at Docker build time
+src
+
+# Maven working directories — keep target/*.jar, exclude everything else
+target/classes
+target/generated-sources
+target/generated-test-sources
+target/maven-archiver
+target/maven-status
+target/surefire-reports
+target/test-classes
+target/*.original

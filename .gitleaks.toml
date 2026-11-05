@@ -1,0 +1,6 @@
+# .gitleaks.toml — secret scanning configuration for Deploy Pulse.
+# useDefault = true inherits the full set of built-in Gitleaks detection rules
+# (API keys, tokens, private keys, etc.) without having to list them manually.
+
+[extend]
+useDefault = true

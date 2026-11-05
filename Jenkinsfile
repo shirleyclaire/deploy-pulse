@@ -1,6 +1,6 @@
 // Deploy Pulse – CI Pipeline
-// Builds the app, scans for secrets, packages a Docker image, and pushes it
-// to Amazon ECR. A deploy stage will be added in a later step.
+// Builds the app, scans for secrets, packages a Docker image, pushes it to
+// Amazon ECR, deploys it to EKS, and verifies the rollout is live.
 
 pipeline {
 
@@ -176,6 +176,179 @@ pipeline {
             }
         }
 
+        // ── Stage 6: Deploy to EKS ───────────────────────────────────────────
+        // Tells Kubernetes to run the new image on the EKS cluster.
+        // The k8s/deployment.yaml file contains the literal text IMAGE_PLACEHOLDER
+        // where the image URL goes. We replace it on the fly with sed and write
+        // the result to a temp file so the repo copy is never modified.
+        stage('Deploy to EKS') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-creds',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    sh """
+                        # Point kubectl at the right EKS cluster.
+                        aws eks update-kubeconfig \
+                            --name ${env.CLUSTER_NAME} \
+                            --region ${env.AWS_REGION}
+
+                        # Ensure the namespace exists (safe to re-run).
+                        kubectl apply -f k8s/namespace.yaml
+
+                        # Replace IMAGE_PLACEHOLDER with the real ECR image URI
+                        # in a temp file -- the workspace file stays untouched.
+                        TEMP_DEPLOY=\$(mktemp /tmp/deployment-XXXXXX.yaml)
+                        sed 's|IMAGE_PLACEHOLDER|${env.IMAGE_URI}|g' \
+                            k8s/deployment.yaml > "\$TEMP_DEPLOY"
+                        kubectl apply -f "\$TEMP_DEPLOY"
+                        rm -f "\$TEMP_DEPLOY"
+
+                        # Apply the LoadBalancer service (safe to re-run).
+                        kubectl apply -f k8s/service.yaml
+                    """
+                }
+            }
+
+            post {
+                // If the deploy commands themselves fail, print pod describe and
+                // logs so the problem is visible without needing cluster access.
+                failure {
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'aws-creds',
+                            usernameVariable: 'AWS_ACCESS_KEY_ID',
+                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                        )
+                    ]) {
+                        sh """
+                            echo '=== kubectl describe pods ==='
+                            kubectl describe pods -n deploy-pulse \
+                                -l app=deploy-pulse || true
+
+                            echo '=== kubectl logs ==='
+                            kubectl logs -n deploy-pulse \
+                                -l app=deploy-pulse \
+                                --tail=100 \
+                                --prefix=true || true
+                        """
+                    }
+                }
+            }
+        }
+
+        // ── Stage 7: Verify ───────────────────────────────────────────────────
+        // Waits for the rollout to complete, then repeatedly hits /api/info
+        // through the LoadBalancer until the response contains the git SHA of
+        // this exact build. That confirms the right image is live and healthy.
+        stage('Verify') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-creds',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    sh """
+                        # Block until all pods are running the new version or
+                        # time out after 3 minutes.
+                        kubectl rollout status deployment/deploy-pulse \
+                            -n deploy-pulse \
+                            --timeout=180s
+
+                        # Show pod and service state for the build log.
+                        echo '=== Pods ==='
+                        kubectl get pods -n deploy-pulse -o wide
+
+                        echo '=== Service ==='
+                        kubectl get svc -n deploy-pulse
+                    """
+
+                    script {
+                        // Read the hostname assigned by AWS to the LoadBalancer.
+                        def lbHost = sh(
+                            script: """
+                                kubectl get svc deploy-pulse \
+                                    -n deploy-pulse \
+                                    -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        echo "Load Balancer hostname: ${lbHost}"
+
+                        // Retry up to 30 times (10 s apart = max ~5 min) waiting
+                        // for the app to respond with the correct git SHA.
+                        // This handles DNS propagation and pod warm-up delays.
+                        def matched = false
+                        def infoJson = ''
+                        for (int i = 1; i <= 30; i++) {
+                            echo "Health-check attempt ${i}/30 ..."
+                            def result = sh(
+                                script: """
+                                    curl -s --max-time 10 \
+                                        http://${lbHost}/api/info || true
+                                """,
+                                returnStdout: true
+                            ).trim()
+
+                            if (result.contains("\"gitSha\":\"${env.GIT_SHORT}\"")) {
+                                matched = true
+                                infoJson = result
+                                break
+                            }
+                            if (i < 30) {
+                                sleep 10
+                            }
+                        }
+
+                        if (!matched) {
+                            error(
+                                "Verification failed: /api/info never returned " +
+                                "gitSha=${env.GIT_SHORT} after 30 attempts (5 min). " +
+                                "The new image may not have rolled out correctly."
+                            )
+                        }
+
+                        echo "=== Verification passed! ==="
+                        echo "Response : ${infoJson}"
+                        echo "Live URL : http://${lbHost}"
+                    }
+                }
+            }
+
+            post {
+                // On any verify failure, dump pod describe and logs so the
+                // reason is visible in the Jenkins console without needing
+                // direct cluster access.
+                failure {
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'aws-creds',
+                            usernameVariable: 'AWS_ACCESS_KEY_ID',
+                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                        )
+                    ]) {
+                        sh """
+                            echo '=== kubectl describe pods ==='
+                            kubectl describe pods -n deploy-pulse \
+                                -l app=deploy-pulse || true
+
+                            echo '=== kubectl logs ==='
+                            kubectl logs -n deploy-pulse \
+                                -l app=deploy-pulse \
+                                --tail=100 \
+                                --prefix=true || true
+                        """
+                    }
+                }
+            }
+        }
+
     }
-    // Deploy stage will be added in a later step once the EKS cluster is ready.
 }
+

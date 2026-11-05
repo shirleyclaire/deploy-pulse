@@ -39,3 +39,4 @@ EXPOSE 8080
 # -XX:MaxRAMPercentage=70 lets the JVM use up to 70 % of the container's
 # memory limit instead of defaulting to 25 % of the host RAM.
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=70", "-jar", "/app/app.jar"]
+

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: deploy-pulse
+  namespace: deploy-pulse
+spec:
+  type: LoadBalancer
+  selector:
+    app: deploy-pulse
+  ports:
+    - port: 80
+      targetPort: 8080

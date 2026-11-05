@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deploy Pulse</title>
+  <style>
+    /* ── Reset & Base ───────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #0d1117;
+      --surface:     #161b22;
+      --surface-alt: #1c2230;
+      --border:      #30363d;
+      --accent:      #58a6ff;
+      --accent-dim:  #1f6feb55;
+      --green:       #3fb950;
+      --red:         #f85149;
+      --text-pri:    #e6edf3;
+      --text-sec:    #8b949e;
+      --text-label:  #6e7681;
+      --radius:      10px;
+      --gap:         1rem;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text-pri);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2.5rem 1rem 4rem;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+      width: 100%;
+      max-width: 900px;
+    }
+
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      font-size: .8rem;
+      font-weight: 600;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--text-label);
+      margin-bottom: 1rem;
+    }
+
+    .logo-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: .4; transform: scale(.75); }
+    }
+
+    h1 {
+      font-size: clamp(1.6rem, 4vw, 2.5rem);
+      font-weight: 700;
+      color: var(--text-pri);
+      line-height: 1.2;
+    }
+
+    .subtitle {
+      font-size: 1rem;
+      color: var(--text-sec);
+      margin-top: .5rem;
+    }
+
+    /* ── Error banner ────────────────────────────────────────────── */
+    #error-banner {
+      display: none;
+      align-items: center;
+      gap: .6rem;
+      background: #3d1a1a;
+      border: 1px solid var(--red);
+      color: var(--red);
+      border-radius: var(--radius);
+      padding: .75rem 1.25rem;
+      font-weight: 600;
+      width: 100%;
+      max-width: 900px;
+      margin-bottom: 1.5rem;
+    }
+
+    #error-banner.visible { display: flex; }
+
+    /* ── Grid ────────────────────────────────────────────────────── */
+    #cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: var(--gap);
+      width: 100%;
+      max-width: 900px;
+    }
+
+    /* ── Card ────────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem 1.4rem;
+      transition: border-color .2s, background .2s;
+    }
+
+    .card:hover {
+      border-color: var(--accent);
+      background: var(--surface-alt);
+    }
+
+    .card-label {
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--text-label);
+      margin-bottom: .4rem;
+    }
+
+    .card-value {
+      font-size: 1rem;
+      font-weight: 500;
+      color: var(--text-pri);
+      word-break: break-all;
+      font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Monaco, Consolas, monospace;
+    }
+
+    .card-value.accent { color: var(--accent); }
+    .card-value.green  { color: var(--green); }
+
+    /* ── Uptime card – wider ─────────────────────────────────────── */
+    .card.wide {
+      grid-column: span 2;
+    }
+
+    @media (max-width: 600px) { .card.wide { grid-column: span 1; } }
+
+    /* ── Footer / last-refreshed ─────────────────────────────────── */
+    footer {
+      margin-top: 2rem;
+      font-size: .78rem;
+      color: var(--text-label);
+      text-align: center;
+    }
+
+    #refresh-time { color: var(--text-sec); font-weight: 500; }
+
+    /* ── Skeleton shimmer ────────────────────────────────────────── */
+    .skeleton .card-value {
+      background: linear-gradient(90deg, var(--surface-alt) 25%, var(--border) 50%, var(--surface-alt) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: 4px;
+      color: transparent;
+      user-select: none;
+      min-width: 80px;
+      display: inline-block;
+    }
+
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="logo-dot"></span>
+    Deploy Pulse
+  </div>
+  <h1 id="heading">Loading&hellip;</h1>
+  <p class="subtitle" id="subtitle"></p>
+</header>
+
+<div id="error-banner" role="alert" aria-live="assertive">
+  ⚠&nbsp; Backend unreachable — retrying every 5 seconds
+</div>
+
+<div id="cards">
+  <!-- skeleton cards rendered by JS on first load -->
+</div>
+
+<footer>
+  Auto-refreshes every 5 s &nbsp;·&nbsp; Last refreshed: <span id="refresh-time">—</span>
+</footer>
+
+<script>
+  /* ── Config ───────────────────────────────────────────────────── */
+  const API_URL       = '/api/info';
+  const POLL_INTERVAL = 5000;
+
+  /* ── Field definitions (order = display order) ────────────────── */
+  const FIELDS = [
+    { key: 'version',     label: 'Version',     cls: 'accent' },
+    { key: 'gitSha',      label: 'Git SHA',      cls: 'accent' },
+    { key: 'buildTime',   label: 'Build Time',   cls: '' },
+    { key: 'podName',     label: 'Pod Name',     cls: '' },
+    { key: 'namespace',   label: 'Namespace',    cls: '' },
+    { key: 'nodeName',    label: 'Node Name',    cls: '' },
+    { key: 'uptime',      label: 'Uptime',       cls: 'green', wide: true },
+    { key: 'serverTime',  label: 'Server Time',  cls: '' },
+  ];
+
+  const banner      = document.getElementById('error-banner');
+  const cardsEl     = document.getElementById('cards');
+  const headingEl   = document.getElementById('heading');
+  const subtitleEl  = document.getElementById('subtitle');
+  const refreshEl   = document.getElementById('refresh-time');
+
+  /* ── Render skeleton ──────────────────────────────────────────── */
+  function renderSkeleton() {
+    cardsEl.innerHTML = FIELDS.map(f => `
+      <div class="card skeleton${f.wide ? ' wide' : ''}">
+        <div class="card-label">${f.label}</div>
+        <div class="card-value ${f.cls}">████████</div>
+      </div>`).join('');
+  }
+
+  /* ── Render real data ─────────────────────────────────────────── */
+  function renderData(data) {
+    headingEl.textContent  = data.message  ?? 'Deploy Pulse';
+    subtitleEl.textContent = data.appName  ?? '';
+
+    cardsEl.innerHTML = FIELDS.map(f => `
+      <div class="card${f.wide ? ' wide' : ''}">
+        <div class="card-label">${f.label}</div>
+        <div class="card-value ${f.cls}">${escHtml(data[f.key] ?? '—')}</div>
+      </div>`).join('');
+  }
+
+  /* ── Fetch & update ───────────────────────────────────────────── */
+  async function refresh() {
+    try {
+      const res = await fetch(API_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      banner.classList.remove('visible');
+      renderData(data);
+      refreshEl.textContent = new Date().toLocaleTimeString();
+    } catch (err) {
+      banner.classList.add('visible');
+      console.error('Deploy Pulse fetch error:', err);
+    }
+  }
+
+  /* ── Bootstrap ────────────────────────────────────────────────── */
+  renderSkeleton();
+  refresh();
+  setInterval(refresh, POLL_INTERVAL);
+
+  /* ── XSS guard ────────────────────────────────────────────────── */
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+</script>
+</body>
+</html>
+

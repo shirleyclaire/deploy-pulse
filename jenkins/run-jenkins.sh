@@ -39,3 +39,4 @@ docker run \
 echo ">>> Jenkins is starting. Open http://localhost:${HOST_PORT} in your browser."
 echo ">>> Initial admin password (once the container is ready):"
 echo "    docker exec ${JENKINS_CONTAINER_NAME} cat /var/jenkins_home/secrets/initialAdminPassword"
+

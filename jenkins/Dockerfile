@@ -85,3 +85,4 @@ RUN echo "=== Tool versions ===" && \
 
 # Keep root so Jenkins can reach the Docker socket mounted at runtime.
 USER root
+

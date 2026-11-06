@@ -10,9 +10,9 @@
 
 set -euo pipefail
 
-JENKINS_CONTAINER_NAME="<JENKINS_CONTAINER_NAME>"
-HOST_PORT="<HOST_PORT>"
-JENKINS_VOLUME="<JENKINS_VOLUME>"
+JENKINS_CONTAINER_NAME="jenkins-server"
+HOST_PORT="8082"
+JENKINS_VOLUME="jenkins_home"
 
 IMAGE_NAME="jenkins-devops:latest"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,4 +39,3 @@ docker run \
 echo ">>> Jenkins is starting. Open http://localhost:${HOST_PORT} in your browser."
 echo ">>> Initial admin password (once the container is ready):"
 echo "    docker exec ${JENKINS_CONTAINER_NAME} cat /var/jenkins_home/secrets/initialAdminPassword"
-

@@ -73,6 +73,11 @@ ENV PATH="/opt/ansible-venv/bin:${PATH}"
 # Install the kubernetes.core Ansible collection (requires the venv on PATH).
 RUN ansible-galaxy collection install kubernetes.core
 
+# Debian packages the Docker client separately from the daemon package.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends docker-cli && \
+    rm -rf /var/lib/apt/lists/*
+
 # ── 6. Smoke-test: print every tool version so a failed install is obvious ────
 RUN echo "=== Tool versions ===" && \
     java -version && \
@@ -85,4 +90,3 @@ RUN echo "=== Tool versions ===" && \
 
 # Keep root so Jenkins can reach the Docker socket mounted at runtime.
 USER root
-

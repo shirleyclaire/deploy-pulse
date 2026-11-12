@@ -1,7 +1,27 @@
-# .gitleaks.toml — secret scanning configuration for Deploy Pulse.
-# useDefault = true inherits the full set of built-in Gitleaks detection rules
-# (API keys, tokens, private keys, etc.) without having to list them manually.
-
 [extend]
 useDefault = true
+
+[[rules]]
+id = "generic-assignment-secret"
+description = "Long values assigned to API-key, secret, or password fields"
+regex = '''(?i)(?:^|[^A-Za-z0-9])(?:azure[_-]?client[_-]?secret|client[_-]?secret|api[_-]?key|account[_-]?key|storage[_-]?key|secret|password)\s*["']?\s*[:=]\s*["']?([A-Za-z0-9_./+~=:%@-]{20,})(?:["']|[\s,;}\]]|$)'''
+secretGroup = 1
+
+[[rules]]
+id = "azure-storage-account-key"
+description = "Azure Storage AccountKey values in connection strings"
+regex = '''(?i)\bAccountKey\s*=\s*["']?([A-Za-z0-9+/]{40,}={0,2})["']?'''
+secretGroup = 1
+
+[[rules]]
+id = "azure-storage-shared-access-signature"
+description = "Azure Storage SharedAccessSignature connection-string signatures"
+regex = '''(?i)\bSharedAccessSignature\s*=\s*["']?[^;\s"'<>]*?[&]sig=([A-Za-z0-9%_./~+-]{20,})'''
+secretGroup = 1
+
+[[rules]]
+id = "azure-storage-sas-query-signature"
+description = "Azure Storage SAS query signatures"
+regex = '''(?i)(?:[?&])?sv=[0-9]{4}-[0-9]{2}-[0-9]{2}[^ \t\r\n"'<>]*?[&]sig=([A-Za-z0-9%_./~+-]{20,})'''
+secretGroup = 1
 

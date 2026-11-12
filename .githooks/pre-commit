@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+
+if [[ -n "${GITLEAKS_BIN:-}" ]]; then
+    gitleaks_bin="$GITLEAKS_BIN"
+elif command -v gitleaks >/dev/null 2>&1; then
+    gitleaks_bin="$(command -v gitleaks)"
+elif [[ -x "$repo_root/gitleaks.exe" ]]; then
+    gitleaks_bin="$repo_root/gitleaks.exe"
+else
+    echo "ERROR: Install Gitleaks or place gitleaks.exe in the repository root." >&2
+    exit 1
+fi
+
+cd "$repo_root"
+exec "$gitleaks_bin" protect \
+    --staged \
+    --config .gitleaks.toml \
+    --redact

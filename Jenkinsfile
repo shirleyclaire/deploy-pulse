@@ -27,6 +27,12 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+                sh '''
+                    if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+                        echo "ERROR: Secret Scan requires a full Git history; disable shallow clone for this Jenkins job." >&2
+                        exit 1
+                    fi
+                '''
                 script {
                     env.GIT_SHORT = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
                     env.IMAGE_TAG = "${env.GIT_SHORT}-${env.BUILD_NUMBER}"
@@ -54,7 +60,24 @@ pipeline {
 
         stage('Secret Scan') {
             steps {
-                sh 'gitleaks detect --no-git --source . --config .gitleaks.toml --redact -v'
+                sh '''
+                    mkdir -p reports
+                    gitleaks detect \
+                        --source . \
+                        --config .gitleaks.toml \
+                        --redact \
+                        --exit-code 1 \
+                        --report-format json \
+                        --report-path reports/gitleaks-report.json \
+                        -v
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/gitleaks-report.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: false
+                }
             }
         }
 

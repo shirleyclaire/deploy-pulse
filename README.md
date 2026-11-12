@@ -37,7 +37,59 @@ with empty pod/replica data while `/api/info` and the dashboard remain usable.
 
 ## Secret scanning
 
-[Gitleaks](https://github.com/gitleaks/gitleaks) is integrated into the Jenkins pipeline and scans every build for accidentally committed secrets such as API keys, tokens, and passwords. If a secret is detected the build fails immediately, preventing the secret from being promoted to any downstream environment. The configuration lives in [`.gitleaks.toml`](.gitleaks.toml) at the repo root and extends Gitleaks' built-in ruleset with no extra allowlists, so all default rules are enforced without exception.
+[Gitleaks](https://github.com/gitleaks/gitleaks) runs before the build and
+deployment stages. Jenkins scans the checked-out commit history (the checkout
+must not be shallow), fails on a finding, and archives a redacted JSON report.
+The config in [`.gitleaks.toml`](.gitleaks.toml) extends the default rules and
+adds these custom matches:
+
+- Case-insensitive assignments using `=`, or JSON/YAML-style `:`, with a field
+  named `api_key`, `api-key`, `apikey`, `client_secret`, `client-secret`,
+  `azure_client_secret`, `account_key`, `account-key`, `storage_key`, `secret`,
+  or `password` (underscore/hyphen separators are optional where applicable).
+  The value must contain a run of 20 or more characters from
+  `[A-Za-z0-9_./+~=:%@-]`, followed by a quote, whitespace, comma, semicolon,
+  closing bracket/brace, or end of line. Quotes around the field or value are
+  optional.
+- Azure Storage `AccountKey=` values containing at least 40 Base64 characters
+  and up to two `=` padding characters.
+- Azure Storage `SharedAccessSignature=` connection strings with an `&sig=`
+  value containing at least 20 URL-safe signature characters.
+- Azure SAS query strings with `sv=YYYY-MM-DD`, followed later by `&sig=` and
+  a signature of at least 20 URL-safe characters.
+
+The custom assignment rule does **not** match a value if it has no 20-character
+run from the stated alphabet followed by one of the listed delimiters. It does
+not match values shorter than 20 contiguous allowed characters, `${ENV_VAR}`
+references, or angle-bracket placeholders such as `<replace-me>`. If a value
+contains a space after an initial 20-character allowed run, that prefix can
+still match. The storage-specific rules have the minimum lengths and alphabets
+stated above. These are syntax-based rules, not proof that a value is live: any
+long literal matching the patterns can be reported. The inherited Gitleaks
+rules may detect additional provider-specific token formats.
+
+To enable the local staged-content hook in this checkout, run in Git Bash:
+
+```bash
+bash scripts/install-pre-commit-hook.sh
+```
+
+The hook blocks a commit if Gitleaks finds a staged secret. To test history
+scanning safely, run:
+
+```bash
+bash scripts/test-secret-scan.sh
+```
+
+It generates random fake values, verifies the staged pre-commit hook blocks
+them, then bypasses that hook only inside the disposable repository to confirm
+history scanning rejects the commit. It never changes this repository's
+branches or history. After the test, remove the temporary repository, report,
+and fake-key history using the printed command:
+
+```bash
+bash scripts/cleanup-secret-scan-test.sh /path/printed/by/the/test
+```
 
 ## Jenkins pipeline agent
 

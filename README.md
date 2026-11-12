@@ -29,6 +29,9 @@ kubectl apply -f k8s/configmap.yaml
 kubectl rollout restart deployment/deploy-pulse -n deploy-pulse
 ```
 
+The Jenkins pipeline sets `CLOUD_NAME` to `Azure AKS` or `Minikube` for the
+selected deployment target.
+
 When Kubernetes is unavailable, `/api/status` returns an unavailable status
 with empty pod/replica data while `/api/info` and the dashboard remain usable.
 
@@ -39,7 +42,9 @@ with empty pod/replica data while `/api/info` and the dashboard remain usable.
 ## Jenkins pipeline agent
 
 The Jenkins controller uses the official `jenkins/jenkins:lts` image. Pipeline
-tools run on a separate Linux inbound agent:
+tools run on a separate Linux inbound agent. It needs Java 17, Maven, Git,
+Docker CLI with access to the Docker socket, Gitleaks, Azure CLI (`az`),
+`kubectl`, `kubelogin`, and Minikube. The agent Dockerfile installs these tools.
 
 1. In Jenkins, create a permanent node named `deploy-pulse-linux`, label it
    `deploy-pulse-linux`, set one executor, and select the inbound-agent launch
@@ -62,6 +67,12 @@ tools run on a separate Linux inbound agent:
 
 The agent mounts the Docker socket so pipeline builds can use the host Docker
 daemon; anyone able to run jobs on this agent can therefore control that
-daemon. Add the Jenkins global username/password credential with ID `aws-creds`
-before the ECR push stage, then create the `deploy-pulse` Pipeline job from SCM
-using branch `*/main` and script path `Jenkinsfile`.
+daemon. It also persists an isolated Minikube profile for the pipeline's
+`TARGET=minikube` fallback; this is not the Minikube cluster on your workstation.
+
+The `TARGET=aks` pipeline path uses a Jenkins **Username with password**
+credential with ID `azure-sp` (service-principal client ID and secret).
+`AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` are non-secret pipeline
+parameters. For Azure setup, resource costs, and teardown, see
+[infra/README-infra.md](infra/README-infra.md). The pipeline job uses branch
+`*/main` and script path `Jenkinsfile`.

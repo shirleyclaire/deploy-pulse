@@ -5,6 +5,8 @@ AGENT_NAME="deploy-pulse-linux"
 AGENT_IMAGE="deploy-pulse-agent:latest"
 AGENT_CONTAINER="${AGENT_NAME}"
 AGENT_WORKSPACE_VOLUME="deploy-pulse-agent-work"
+AGENT_MINIKUBE_VOLUME="deploy-pulse-agent-minikube"
+AGENT_KUBE_VOLUME="deploy-pulse-agent-kube"
 JENKINS_URL="${JENKINS_URL:-http://host.docker.internal:8082}"
 
 : "${JENKINS_AGENT_SECRET:?Set JENKINS_AGENT_SECRET to the secret shown for the Jenkins inbound agent}"
@@ -16,6 +18,10 @@ fi
 
 docker volume inspect "${AGENT_WORKSPACE_VOLUME}" >/dev/null 2>&1 || \
     docker volume create "${AGENT_WORKSPACE_VOLUME}" >/dev/null
+docker volume inspect "${AGENT_MINIKUBE_VOLUME}" >/dev/null 2>&1 || \
+    docker volume create "${AGENT_MINIKUBE_VOLUME}" >/dev/null
+docker volume inspect "${AGENT_KUBE_VOLUME}" >/dev/null 2>&1 || \
+    docker volume create "${AGENT_KUBE_VOLUME}" >/dev/null
 
 docker run \
     --name "${AGENT_CONTAINER}" \
@@ -28,6 +34,8 @@ docker run \
     --env JENKINS_AGENT_WORKDIR="/home/jenkins/agent" \
     --env JENKINS_WEB_SOCKET=true \
     --volume "${AGENT_WORKSPACE_VOLUME}:/home/jenkins/agent" \
+    --volume "${AGENT_MINIKUBE_VOLUME}:/home/jenkins/.minikube" \
+    --volume "${AGENT_KUBE_VOLUME}:/home/jenkins/.kube" \
     --volume "/var/run/docker.sock:/var/run/docker.sock" \
     "${AGENT_IMAGE}"
 

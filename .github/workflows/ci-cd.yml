@@ -203,7 +203,7 @@ jobs:
           kubernetes_version="$(az aks show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_AKS_NAME" \
-            --query kubernetesVersion --output tsv)"
+            --query currentKubernetesVersion --output tsv)"
           az aks install-cli \
             --client-version "v${kubernetes_version}" \
             --install-location "$RUNNER_TEMP/kubectl" \

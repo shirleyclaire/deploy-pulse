@@ -20,6 +20,7 @@ spec:
       labels:
         app: deploy-pulse
     spec:
+      serviceAccountName: deploy-pulse
       containers:
         - name: deploy-pulse
           image: IMAGE_PLACEHOLDER
@@ -39,6 +40,21 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: APP_TITLE
+              valueFrom:
+                configMapKeyRef:
+                  name: deploy-pulse-config
+                  key: APP_TITLE
+            - name: ACCENT_COLOR
+              valueFrom:
+                configMapKeyRef:
+                  name: deploy-pulse-config
+                  key: ACCENT_COLOR
+            - name: CLOUD_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: deploy-pulse-config
+                  key: CLOUD_NAME
           startupProbe:
             httpGet:
               path: /api/health

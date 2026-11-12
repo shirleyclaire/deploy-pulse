@@ -28,6 +28,9 @@ class InfoControllerTest {
     @MockBean
     private InfoService infoService;
 
+    @MockBean
+    private KubernetesStatusService kubernetesStatusService;
+
     /** Canonical {@link AppInfo} returned by the stubbed service. */
     private static final AppInfo SAMPLE = new AppInfo(
             "Deploy Pulse",
@@ -43,9 +46,24 @@ class InfoControllerTest {
             "2024-01-01T00:01:00Z"
     );
 
+    private static final KubernetesStatus STATUS = new KubernetesStatus(
+            true,
+            true,
+            "Kubernetes status loaded from namespace 'test-ns'.",
+            new KubernetesStatus.ReplicaCounts(2, 1, 1),
+            "abc1234",
+            "Test Kubernetes",
+            "Test Dashboard",
+            "#123abc",
+            java.util.List.of(new KubernetesStatus.PodStatus(
+                    "test-pod", "Running", "test-node", "3m", true
+            ))
+    );
+
     @BeforeEach
     void setUp() {
         when(infoService.getInfo()).thenReturn(SAMPLE);
+        when(kubernetesStatusService.getStatus()).thenReturn(STATUS);
     }
 
     // ── /api/info ──────────────────────────────────────────────────────────────
@@ -75,6 +93,24 @@ class InfoControllerTest {
         mockMvc.perform(get("/api/info"))
                .andExpect(status().isOk())
                .andExpect(content().contentTypeCompatibleWith("application/json"));
+    }
+
+    // ── /api/status ────────────────────────────────────────────────────────────
+
+    @Test
+    void statusEndpoint_returnsReplicaPodAndDisplayMetadata() throws Exception {
+        mockMvc.perform(get("/api/status"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$.apiAvailable").value(true))
+               .andExpect(jsonPath("$.replicas.desired").value(2))
+               .andExpect(jsonPath("$.replicas.ready").value(1))
+               .andExpect(jsonPath("$.replicas.available").value(1))
+               .andExpect(jsonPath("$.pods[0].name").value("test-pod"))
+               .andExpect(jsonPath("$.pods[0].serving").value(true))
+               .andExpect(jsonPath("$.imageTag").value("abc1234"))
+               .andExpect(jsonPath("$.cloudName").value("Test Kubernetes"))
+               .andExpect(jsonPath("$.appTitle").value("Test Dashboard"))
+               .andExpect(jsonPath("$.accentColor").value("#123abc"));
     }
 
     // ── /api/health ────────────────────────────────────────────────────────────

@@ -8,16 +8,18 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * REST controller exposing deployment-metadata and health endpoints.
+ * REST controller exposing deployment metadata, Kubernetes status, and health endpoints.
  */
 @RestController
 @RequestMapping("/api")
 public class InfoController {
 
     private final InfoService infoService;
+    private final KubernetesStatusService kubernetesStatusService;
 
-    public InfoController(InfoService infoService) {
+    public InfoController(InfoService infoService, KubernetesStatusService kubernetesStatusService) {
         this.infoService = infoService;
+        this.kubernetesStatusService = kubernetesStatusService;
     }
 
     /**
@@ -26,6 +28,11 @@ public class InfoController {
     @GetMapping("/info")
     public ResponseEntity<AppInfo> info() {
         return ResponseEntity.ok(infoService.getInfo());
+    }
+
+    @GetMapping("/status")
+    public ResponseEntity<KubernetesStatus> status() {
+        return ResponseEntity.ok(kubernetesStatusService.getStatus());
     }
 
     /**

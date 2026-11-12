@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deploy-pulse-config
+  namespace: deploy-pulse
+data:
+  APP_TITLE: "Deploy Pulse"
+  ACCENT_COLOR: "#58a6ff"
+  CLOUD_NAME: "Kubernetes"

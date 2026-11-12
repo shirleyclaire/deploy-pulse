@@ -141,6 +141,103 @@
     .card-value.accent { color: var(--accent); }
     .card-value.green  { color: var(--green); }
 
+    /* ── Kubernetes status ──────────────────────────────────────── */
+    #cluster-panel {
+      width: 100%;
+      max-width: 900px;
+      margin-top: 1.5rem;
+    }
+
+    .cluster-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: .8rem;
+    }
+
+    .cluster-heading h2 {
+      font-size: 1rem;
+      color: var(--text-pri);
+    }
+
+    .badge, .serving-badge {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--accent);
+      border-radius: 999px;
+      color: var(--accent);
+      font-size: .72rem;
+      font-weight: 700;
+      padding: .2rem .65rem;
+      white-space: nowrap;
+    }
+
+    #cluster-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: var(--gap);
+    }
+
+    .replica-values {
+      display: flex;
+      justify-content: space-between;
+      gap: .5rem;
+      margin-top: .5rem;
+    }
+
+    .replica-value {
+      display: grid;
+      gap: .35rem;
+      color: var(--text-sec);
+      font-size: .75rem;
+    }
+
+    .replica-value strong {
+      color: var(--accent);
+      font: 600 1.2rem "SF Mono", "Fira Code", Menlo, monospace;
+    }
+
+    #cluster-message {
+      color: var(--text-sec);
+      font-size: .82rem;
+      margin: .8rem 0;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    #pods-table {
+      border-collapse: collapse;
+      min-width: 600px;
+      text-align: left;
+      width: 100%;
+    }
+
+    #pods-table th, #pods-table td {
+      border-bottom: 1px solid var(--border);
+      padding: .8rem 1rem;
+      font-size: .82rem;
+    }
+
+    #pods-table th {
+      color: var(--text-label);
+      font-size: .68rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    #pods-table tr:last-child td { border-bottom: 0; }
+    #pods-table tr.serving-pod {
+      background: var(--surface-alt);
+      box-shadow: inset 3px 0 var(--accent);
+    }
+    .serving-badge { margin-left: .5rem; font-size: .62rem; }
+
     /* ── Uptime card – wider ─────────────────────────────────────── */
     .card.wide {
       grid-column: span 2;
@@ -181,7 +278,7 @@
 <header>
   <div class="logo">
     <span class="logo-dot"></span>
-    Deploy Pulse
+    <span id="brand-title">Deploy Pulse</span>
   </div>
   <h1 id="heading">Loading&hellip;</h1>
   <p class="subtitle" id="subtitle"></p>
@@ -195,13 +292,46 @@
   <!-- skeleton cards rendered by JS on first load -->
 </div>
 
+<section id="cluster-panel" aria-labelledby="cluster-heading">
+  <div class="cluster-heading">
+    <h2 id="cluster-heading">Kubernetes status</h2>
+    <span id="cloud-badge" class="badge">Kubernetes</span>
+  </div>
+  <div id="cluster-summary">
+    <div class="card">
+      <div class="card-label">Replicas</div>
+      <div class="replica-values">
+        <div class="replica-value">Desired<strong id="replicas-desired">—</strong></div>
+        <div class="replica-value">Ready<strong id="replicas-ready">—</strong></div>
+        <div class="replica-value">Available<strong id="replicas-available">—</strong></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-label">Image Tag</div>
+      <div class="card-value accent" id="image-tag">—</div>
+    </div>
+  </div>
+  <p id="cluster-message" role="status" aria-live="polite">Waiting for cluster status…</p>
+  <div class="table-wrap">
+    <table id="pods-table">
+      <thead>
+        <tr><th>Name</th><th>Status</th><th>Node</th><th>Age</th></tr>
+      </thead>
+      <tbody id="pods-body">
+        <tr><td colspan="4">Loading pods…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
 <footer>
   Auto-refreshes every 5 s &nbsp;·&nbsp; Last refreshed: <span id="refresh-time">—</span>
 </footer>
 
 <script>
   /* ── Config ───────────────────────────────────────────────────── */
-  const API_URL       = '/api/info';
+  const INFO_API_URL  = '/api/info';
+  const STATUS_API_URL = '/api/status';
   const POLL_INTERVAL = 5000;
 
   /* ── Field definitions (order = display order) ────────────────── */
@@ -219,8 +349,12 @@
   const banner      = document.getElementById('error-banner');
   const cardsEl     = document.getElementById('cards');
   const headingEl   = document.getElementById('heading');
+  const brandTitleEl = document.getElementById('brand-title');
   const subtitleEl  = document.getElementById('subtitle');
   const refreshEl   = document.getElementById('refresh-time');
+  const cloudBadgeEl = document.getElementById('cloud-badge');
+  const clusterMessageEl = document.getElementById('cluster-message');
+  const podsBodyEl = document.getElementById('pods-body');
 
   /* ── Render skeleton ──────────────────────────────────────────── */
   function renderSkeleton() {
@@ -243,19 +377,92 @@
       </div>`).join('');
   }
 
+  function renderClusterStatus(status) {
+    const title = status.appTitle || 'Deploy Pulse';
+    document.title = title;
+    brandTitleEl.textContent = title;
+    headingEl.textContent = title;
+    document.documentElement.style.setProperty('--accent', status.accentColor || '#58a6ff');
+
+    cloudBadgeEl.textContent = status.cloudName || 'Kubernetes';
+    document.getElementById('image-tag').textContent = status.imageTag || '—';
+
+    const replicas = status.replicas;
+    document.getElementById('replicas-desired').textContent = replicas?.desired ?? '—';
+    document.getElementById('replicas-ready').textContent = replicas?.ready ?? '—';
+    document.getElementById('replicas-available').textContent = replicas?.available ?? '—';
+    clusterMessageEl.textContent = status.message || (
+      status.apiAvailable ? 'Kubernetes status loaded.' : 'Kubernetes API is unavailable.'
+    );
+
+    podsBodyEl.replaceChildren();
+    if (!status.pods?.length) {
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 4;
+      cell.textContent = status.apiAvailable ? 'No pods found in this namespace.' : 'Pod details are unavailable.';
+      row.appendChild(cell);
+      podsBodyEl.appendChild(row);
+      return;
+    }
+
+    for (const pod of status.pods) {
+      const row = document.createElement('tr');
+      if (pod.serving) row.classList.add('serving-pod');
+      for (const value of [pod.name, pod.status, pod.node, pod.age]) {
+        const cell = document.createElement('td');
+        cell.textContent = value || 'unknown';
+        row.appendChild(cell);
+      }
+      if (pod.serving) {
+        const badge = document.createElement('span');
+        badge.className = 'serving-badge';
+        badge.textContent = 'Serving this request';
+        row.firstElementChild.appendChild(badge);
+      }
+      podsBodyEl.appendChild(row);
+    }
+  }
+
+  function renderClusterUnavailable(message) {
+    renderClusterStatus({
+      apiAvailable: false,
+      appTitle: 'Deploy Pulse',
+      accentColor: '#58a6ff',
+      cloudName: 'Kubernetes',
+      imageTag: '—',
+      message,
+      pods: []
+    });
+  }
+
   /* ── Fetch & update ───────────────────────────────────────────── */
   async function refresh() {
-    try {
-      const res = await fetch(API_URL);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+    const [infoResult, statusResult] = await Promise.allSettled([
+      fetch(INFO_API_URL).then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      }),
+      fetch(STATUS_API_URL).then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+    ]);
 
+    if (infoResult.status === 'fulfilled') {
       banner.classList.remove('visible');
-      renderData(data);
+      renderData(infoResult.value);
       refreshEl.textContent = new Date().toLocaleTimeString();
-    } catch (err) {
+    } else {
       banner.classList.add('visible');
-      console.error('Deploy Pulse fetch error:', err);
+      console.error('Deploy Pulse info fetch error:', infoResult.reason);
+    }
+
+    if (statusResult.status === 'fulfilled') {
+      renderClusterStatus(statusResult.value);
+    } else {
+      console.error('Deploy Pulse status fetch error:', statusResult.reason);
+      renderClusterUnavailable('Cluster status endpoint is unavailable; retrying.');
     }
   }
 

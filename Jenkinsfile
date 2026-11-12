@@ -4,7 +4,9 @@
 
 pipeline {
 
-    agent any
+    agent {
+        label 'deploy-pulse-linux'
+    }
 
     options {
         // Prefix every log line with a timestamp so it's easy to see how long
@@ -49,7 +51,7 @@ pipeline {
                     // Short 7-character git commit hash -- used as the image tag
                     // so every image is traceable back to an exact commit.
                     env.GIT_SHORT = sh(
-                        script: 'git rev-parse --short=7 HEAD',
+                        script: 'git rev-parse --short HEAD',
                         returnStdout: true
                     ).trim()
 
@@ -58,7 +60,7 @@ pipeline {
                     env.IMAGE_TAG = "${env.GIT_SHORT}-${env.BUILD_NUMBER}"
 
                     // Human-readable application version shown in /api/info.
-                    env.APP_VERSION = "1.0.${env.BUILD_NUMBER}"
+                    env.APP_VERSION = "${env.BUILD_NUMBER}"
 
                     // UTC timestamp embedded in the image and shown in /api/info.
                     env.BUILD_TIME = sh(

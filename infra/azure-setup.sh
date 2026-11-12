@@ -9,13 +9,18 @@ for command_name in az kubectl; do
 done
 
 : "${AZURE_ACR_NAME:?Set AZURE_ACR_NAME to a globally unique 5-50 character ACR name}"
+: "${GITHUB_REPOSITORY:?Set GITHUB_REPOSITORY to owner/repository for the GitHub Actions identity}"
 AZURE_RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-deploy-pulse-rg}"
 AZURE_AKS_NAME="${AZURE_AKS_NAME:-deploy-pulse-aks}"
 AZURE_LOCATION="${AZURE_LOCATION:-centralindia}"
-AZURE_SP_NAME="${AZURE_SP_NAME:-deploy-pulse-jenkins}"
+AZURE_IDENTITY_NAME="${AZURE_IDENTITY_NAME:-deploy-pulse-github-actions}"
 
 if [[ ! "$AZURE_ACR_NAME" =~ ^[a-z0-9]{5,50}$ ]]; then
     echo "ERROR: AZURE_ACR_NAME must be 5-50 lowercase letters or digits." >&2
+    exit 1
+fi
+if [[ ! "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    echo "ERROR: GITHUB_REPOSITORY must use owner/repository format." >&2
     exit 1
 fi
 
@@ -116,25 +121,38 @@ kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/configmap.yaml
 kubectl apply -f k8s/rbac.yaml
 
-if az ad sp list --display-name "$AZURE_SP_NAME" --query '[0].appId' --output tsv \
-    | grep -q .; then
-    echo "ERROR: A service principal named $AZURE_SP_NAME already exists." >&2
-    echo "Choose a new AZURE_SP_NAME or manage that identity and its credentials manually." >&2
-    exit 1
-fi
-
-sp_credentials="$(az ad sp create-for-rbac \
-    --name "$AZURE_SP_NAME" \
-    --skip-assignment \
-    --years 1 \
-    --query '[appId, password, tenant]' \
-    --output tsv)"
-IFS=$'\t' read -r sp_client_id sp_client_secret sp_tenant_id <<< "$sp_credentials"
-if [[ -z "$sp_client_id" || -z "$sp_client_secret" || -z "$sp_tenant_id" ]]; then
-    echo "ERROR: Azure did not return complete service-principal credentials." >&2
-    exit 1
+sp_client_id="$(az ad sp list --display-name "$AZURE_IDENTITY_NAME" --query '[0].appId' --output tsv)"
+if [[ -z "$sp_client_id" || "$sp_client_id" == "None" ]]; then
+    sp_client_id="$(az ad app create \
+        --display-name "$AZURE_IDENTITY_NAME" \
+        --sign-in-audience AzureADMyOrg \
+        --query appId --output tsv)"
+    az ad sp create --id "$sp_client_id" --only-show-errors --output none
 fi
 sp_object_id="$(az ad sp show --id "$sp_client_id" --query id --output tsv)"
+app_object_id="$(az ad app show --id "$sp_client_id" --query id --output tsv)"
+sp_tenant_id="$(az account show --query tenantId --output tsv)"
+
+federated_subject="repo:${GITHUB_REPOSITORY}:ref:refs/heads/main"
+existing_federated_subject="$(az ad app federated-credential list \
+    --id "$app_object_id" \
+    --query "[?name=='github-actions-main'] | [0].subject" \
+    --output tsv)"
+if [[ -z "$existing_federated_subject" || "$existing_federated_subject" == "None" ]]; then
+    federated_credential="$(printf \
+        '{"name":"github-actions-main","issuer":"https://token.actions.githubusercontent.com/","subject":"%s","description":"GitHub Actions deployment from main","audiences":["api://AzureADTokenExchange"]}' \
+        "$federated_subject")"
+    az ad app federated-credential create \
+        --id "$app_object_id" \
+        --parameters "$federated_credential" \
+        --only-show-errors --output none
+elif [[ "$existing_federated_subject" != "$federated_subject" ]]; then
+    echo "ERROR: Existing GitHub federated credential uses a different subject:" >&2
+    echo "  $existing_federated_subject" >&2
+    echo "Expected: $federated_subject" >&2
+    echo "Update or remove that credential before rerunning setup." >&2
+    exit 1
+fi
 
 acr_id="$(az acr show --name "$AZURE_ACR_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query id --output tsv)"
 aks_id="$(az aks show --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_AKS_NAME" --query id --output tsv)"
@@ -165,19 +183,24 @@ ensure_role_assignment "Azure Kubernetes Service RBAC Writer" "${aks_id}/namespa
 
 cat <<CREDENTIALS
 
-Setup submitted successfully. Azure role assignments can take several minutes to propagate.
-Create a Jenkins credential of kind "Username with password", ID exactly "azure-sp":
-  Username (client ID):     ${sp_client_id}
-  Password (client secret): ${sp_client_secret}
-Use this non-secret tenant ID as the Jenkins AZURE_TENANT_ID parameter:
-  ${sp_tenant_id}
-Subscription ID:
-  ${AZURE_SUBSCRIPTION_ID}
+Setup completed. Azure role assignments can take several minutes to propagate.
+In GitHub repository Settings > Secrets and variables > Actions > Variables,
+add these repository variables:
+  AZURE_CLIENT_ID:       ${sp_client_id}
+  AZURE_TENANT_ID:       ${sp_tenant_id}
+  AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID}
+  AZURE_ACR_NAME:        ${AZURE_ACR_NAME}
+  AZURE_RESOURCE_GROUP:  ${AZURE_RESOURCE_GROUP}
+  AZURE_AKS_NAME:        ${AZURE_AKS_NAME}
 
-The service principal has AcrPush on this ACR, Cluster User on this AKS cluster,
-and AKS RBAC Writer only in namespace deploy-pulse. The built-in namespace
-Writer role can read namespace Secrets and create pods as namespace service
-accounts; do not store unrelated or sensitive Secrets in this namespace.
-The service-principal secret is printed only so you can enter it directly in
-Jenkins. Do not copy it into the repository or a checked-in file.
+The federated credential is limited to ${GITHUB_REPOSITORY} on the main branch.
+No Azure client secret is created or stored by this workflow.
+
+Tenant ID:
+  ${sp_tenant_id}
+
+The identity has AcrPush on this ACR, Cluster User on this AKS cluster, and AKS
+RBAC Writer only in namespace deploy-pulse. The built-in namespace Writer role
+can read namespace Secrets and create pods as namespace service accounts; do
+not store unrelated or sensitive Secrets in this namespace.
 CREDENTIALS

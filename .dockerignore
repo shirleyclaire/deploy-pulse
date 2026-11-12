@@ -10,8 +10,7 @@
 k8s
 ansible
 infra
-jenkins
-Jenkinsfile
+.github
 .gitleaks.toml
 
 # Source code — only the compiled jar is needed at Docker build time

@@ -1,0 +1,303 @@
+name: CI and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-pulse-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    name: Secret scan, build, and test
+    runs-on: ubuntu-latest
+    outputs:
+      git_short: ${{ steps.metadata.outputs.git_short }}
+      image_tag: ${{ steps.metadata.outputs.image_tag }}
+      build_time: ${{ steps.metadata.outputs.build_time }}
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -er '.tag_name | ltrimstr("v")')"
+          case "$(uname -m)" in
+            x86_64) architecture=x64 ;;
+            aarch64|arm64) architecture=arm64 ;;
+            *)
+              echo "Unsupported runner architecture: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+
+          archive="gitleaks_${version}_linux_${architecture}.tar.gz"
+          release_url="https://github.com/gitleaks/gitleaks/releases/download/v${version}"
+          curl -fsSL "${release_url}/${archive}" -o "$RUNNER_TEMP/$archive"
+          curl -fsSL "${release_url}/gitleaks_${version}_checksums.txt" \
+            -o "$RUNNER_TEMP/gitleaks_checksums.txt"
+          checksum_line="$(grep -E "^[[:xdigit:]]{64}[[:space:]]+\\*?${archive}$" \
+            "$RUNNER_TEMP/gitleaks_checksums.txt")"
+          printf '%s\n' "$checksum_line" > "$RUNNER_TEMP/gitleaks_checksum.txt"
+          (cd "$RUNNER_TEMP" && sha256sum --check --status gitleaks_checksum.txt)
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Scan commit history
+        shell: bash
+        run: |
+          mkdir -p reports
+          gitleaks detect \
+            --source . \
+            --config .gitleaks.toml \
+            --redact \
+            --exit-code 1 \
+            --report-format json \
+            --report-path reports/gitleaks-report.json \
+            -v
+
+      - name: Archive redacted Gitleaks report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: reports/gitleaks-report.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Set build metadata
+        id: metadata
+        shell: bash
+        run: |
+          git_short="$(git rev-parse --short=7 HEAD)"
+          image_tag="${git_short}-${GITHUB_RUN_NUMBER}"
+          build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          {
+            echo "git_short=$git_short"
+            echo "image_tag=$image_tag"
+            echo "build_time=$build_time"
+          } >> "$GITHUB_OUTPUT"
+          echo "GIT_SHORT=$git_short"
+          echo "IMAGE_TAG=$image_tag"
+          echo "APP_VERSION=$GITHUB_RUN_NUMBER"
+          echo "BUILD_TIME=$build_time"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Build and test
+        run: mvn -B clean verify
+
+      - name: Archive JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-results
+          path: target/surefire-reports/*.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Archive application jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-pulse-jar
+          path: |
+            target/deploy-pulse-*.jar
+            !target/*.original
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy-and-verify:
+    name: Deploy and verify on AKS
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_AKS_NAME: ${{ vars.AZURE_AKS_NAME }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      IMAGE_REPO: deploy-pulse
+      GIT_SHORT: ${{ needs.build-and-test.outputs.git_short }}
+      IMAGE_TAG: ${{ needs.build-and-test.outputs.image_tag }}
+      BUILD_TIME: ${{ needs.build-and-test.outputs.build_time }}
+      APP_VERSION: ${{ github.run_number }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download application jar
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-pulse-jar
+          path: target
+
+      - name: Validate Azure configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${AZURE_CLIENT_ID:?Set the AZURE_CLIENT_ID repository variable}"
+          : "${AZURE_TENANT_ID:?Set the AZURE_TENANT_ID repository variable}"
+          : "${AZURE_SUBSCRIPTION_ID:?Set the AZURE_SUBSCRIPTION_ID repository variable}"
+          : "${AZURE_ACR_NAME:?Set the AZURE_ACR_NAME repository variable}"
+          : "${AZURE_RESOURCE_GROUP:?Set the AZURE_RESOURCE_GROUP repository variable}"
+          : "${AZURE_AKS_NAME:?Set the AZURE_AKS_NAME repository variable}"
+
+      - name: Sign in to Azure with GitHub OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push image to ACR
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${AZURE_ACR_NAME:?Set the AZURE_ACR_NAME repository variable}"
+          : "${AZURE_RESOURCE_GROUP:?Set the AZURE_RESOURCE_GROUP repository variable}"
+          cleanup() {
+            az acr logout --name "$AZURE_ACR_NAME" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          login_server="$(az acr show \
+            --name "$AZURE_ACR_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query loginServer --output tsv)"
+          image_uri="${login_server}/${IMAGE_REPO}:${IMAGE_TAG}"
+
+          az acr login --name "$AZURE_ACR_NAME" --only-show-errors
+          docker build --platform linux/amd64 \
+            --build-arg "APP_VERSION=${APP_VERSION}" \
+            --build-arg "GIT_SHA=${GIT_SHORT}" \
+            --build-arg "BUILD_TIME=${BUILD_TIME}" \
+            --tag "$image_uri" .
+          docker push "$image_uri"
+          echo "IMAGE_URI=$image_uri" >> "$GITHUB_ENV"
+
+      - name: Install kubectl and kubelogin
+        shell: bash
+        run: |
+          kubernetes_version="$(az aks show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_AKS_NAME" \
+            --query kubernetesVersion --output tsv)"
+          az aks install-cli \
+            --client-version "v${kubernetes_version}" \
+            --install-location "$RUNNER_TEMP/kubectl" \
+            --kubelogin-install-location "$RUNNER_TEMP/kubelogin"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Deploy and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${AZURE_AKS_NAME:?Set the AZURE_AKS_NAME repository variable}"
+          : "${AZURE_RESOURCE_GROUP:?Set the AZURE_RESOURCE_GROUP repository variable}"
+          deploy_manifest_dir="$(mktemp -d)"
+          deployment_applied=false
+
+          cleanup() {
+            rm -rf "$deploy_manifest_dir"
+            az acr logout --name "$AZURE_ACR_NAME" >/dev/null 2>&1 || true
+          }
+          on_exit() {
+            exit_code=$?
+            trap - EXIT
+            if [ "$exit_code" -ne 0 ] && [ "$deployment_applied" = "true" ]; then
+              echo "Deployment verification failed; rolling back."
+              kubectl rollout undo deployment/deploy-pulse -n deploy-pulse || true
+              kubectl describe pods -l app=deploy-pulse -n deploy-pulse || true
+              pods="$(kubectl get pods -l app=deploy-pulse -n deploy-pulse \
+                -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
+              for pod in $pods; do
+                kubectl logs "$pod" -n deploy-pulse --all-containers=true --tail=100 || true
+              done
+            fi
+            cleanup
+            exit "$exit_code"
+          }
+          trap on_exit EXIT
+
+          az aks get-credentials \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_AKS_NAME" \
+            --overwrite-existing --only-show-errors
+          kubelogin convert-kubeconfig -l azurecli
+
+          cp -R k8s/. "$deploy_manifest_dir/"
+          sed "s|IMAGE_PLACEHOLDER|${IMAGE_URI}|g" \
+            k8s/deployment.yaml > "$deploy_manifest_dir/deployment.yaml"
+          sed 's/CLOUD_NAME: "Kubernetes"/CLOUD_NAME: "Azure AKS"/' \
+            k8s/configmap.yaml > "$deploy_manifest_dir/configmap.yaml"
+          sed 's/type: ClusterIP/type: LoadBalancer/' \
+            k8s/service.yaml > "$deploy_manifest_dir/service.yaml"
+
+          kubectl apply -f "$deploy_manifest_dir/namespace.yaml"
+          kubectl apply -f "$deploy_manifest_dir/configmap.yaml"
+          kubectl apply -f "$deploy_manifest_dir/rbac.yaml"
+          kubectl apply -f "$deploy_manifest_dir/service.yaml"
+          kubectl apply -f "$deploy_manifest_dir/deployment.yaml"
+          deployment_applied=true
+
+          kubectl rollout status deployment/deploy-pulse -n deploy-pulse --timeout=180s
+          kubectl get pods -n deploy-pulse -o wide
+          kubectl get svc -n deploy-pulse
+
+          host=""
+          for attempt in $(seq 1 30); do
+            host="$(kubectl get svc deploy-pulse -n deploy-pulse \
+              -o jsonpath='{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}')"
+            if [ -n "$host" ]; then
+              break
+            fi
+            sleep 10
+          done
+          if [ -z "$host" ]; then
+            echo "ERROR: Load balancer did not receive an address within five minutes." >&2
+            exit 1
+          fi
+
+          matched=false
+          response=""
+          for attempt in $(seq 1 30); do
+            response="$(curl -fsS --max-time 10 "http://${host}/api/status" || true)"
+            if printf '%s' "$response" | jq -e --arg sha "$GIT_SHORT" '.gitSha == $sha' >/dev/null 2>&1; then
+              matched=true
+              break
+            fi
+            if [ "$attempt" -lt 30 ]; then
+              sleep 10
+            fi
+          done
+          if [ "$matched" != "true" ]; then
+            echo "ERROR: /api/status did not return gitSha=${GIT_SHORT} after 30 attempts." >&2
+            exit 1
+          fi
+
+          echo "Verified /api/status: ${response}"
+          echo "Dashboard URL: http://${host}"
+          kubectl get deployment deploy-pulse -n deploy-pulse \
+            -o jsonpath='Deployment replicas: desired={.spec.replicas} ready={.status.readyReplicas} available={.status.availableReplicas}{"\n"}'

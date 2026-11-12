@@ -4,7 +4,7 @@ metadata:
   name: deploy-pulse
   namespace: deploy-pulse
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: deploy-pulse
   ports:

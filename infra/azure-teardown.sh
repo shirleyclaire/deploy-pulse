@@ -31,7 +31,8 @@ cat <<WARNING
 WARNING: This permanently deletes the entire resource group "$AZURE_RESOURCE_GROUP"
 in subscription "$subscription_id" and every resource in it, including AKS,
 ACR, disks, and public networking.
-It does not delete the Microsoft Entra service principal created for Jenkins.
+It does not delete the Microsoft Entra application/service principal used by
+GitHub Actions. Remove that identity separately after confirming it is unused.
 WARNING
 read -r -p "Type the exact resource group name to continue: " confirmation
 if [[ "$confirmation" != "$AZURE_RESOURCE_GROUP" ]]; then

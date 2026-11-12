@@ -6,6 +6,7 @@ public record KubernetesStatus(
         boolean apiAvailable,
         boolean deploymentFound,
         String message,
+        String gitSha,
         ReplicaCounts replicas,
         String imageTag,
         String cloudName,

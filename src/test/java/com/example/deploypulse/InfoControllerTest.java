@@ -50,6 +50,7 @@ class InfoControllerTest {
             true,
             true,
             "Kubernetes status loaded from namespace 'test-ns'.",
+            "abc1234",
             new KubernetesStatus.ReplicaCounts(2, 1, 1),
             "abc1234",
             "Test Kubernetes",
@@ -102,6 +103,7 @@ class InfoControllerTest {
         mockMvc.perform(get("/api/status"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.apiAvailable").value(true))
+               .andExpect(jsonPath("$.gitSha").value("abc1234"))
                .andExpect(jsonPath("$.replicas.desired").value(2))
                .andExpect(jsonPath("$.replicas.ready").value(1))
                .andExpect(jsonPath("$.replicas.available").value(1))

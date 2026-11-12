@@ -127,4 +127,7 @@ credential with ID `azure-sp` (service-principal client ID and secret).
 `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` are non-secret pipeline
 parameters. For Azure setup, resource costs, and teardown, see
 [infra/README-infra.md](infra/README-infra.md). The pipeline job uses branch
-`*/main` and script path `Jenkinsfile`.
+`*/main` and script path `Jenkinsfile`. Deploy and Verify run only for the
+`main` branch; Verify checks `/api/status` for the build's Git SHA, rolls back
+the Deployment if verification fails, and prints desired/ready/available
+replica counts.

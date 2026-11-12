@@ -43,6 +43,7 @@ public class KubernetesStatusService {
 
     public KubernetesStatus getStatus() {
         String namespace = resolve("POD_NAMESPACE", resolve("KUBERNETES_NAMESPACE", "deploy-pulse"));
+        String gitSha = resolve("GIT_SHA", "unknown");
         String appTitle = resolve("APP_TITLE", "Deploy Pulse");
         String cloudName = resolve("CLOUD_NAME", "Kubernetes");
         String accentColor = resolveAccentColor();
@@ -62,6 +63,7 @@ public class KubernetesStatusService {
                         true,
                         false,
                         "Deployment '" + DEPLOYMENT_NAME + "' was not found in namespace '" + namespace + "'.",
+                        gitSha,
                         null,
                         "unknown",
                         cloudName,
@@ -75,6 +77,7 @@ public class KubernetesStatusService {
                     true,
                     true,
                     "Kubernetes status loaded from namespace '" + namespace + "'.",
+                    gitSha,
                     replicaCounts(deployment),
                     imageTag(deployment),
                     cloudName,
@@ -88,6 +91,7 @@ public class KubernetesStatusService {
                     false,
                     false,
                     "Kubernetes API is unavailable for namespace '" + namespace + "'.",
+                    gitSha,
                     null,
                     "unknown",
                     cloudName,

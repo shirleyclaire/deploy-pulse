@@ -35,6 +35,7 @@ class KubernetesStatusServiceTest {
         KubernetesStatusService service = service(reader, Map.of(
                 "POD_NAMESPACE", NAMESPACE,
                 "POD_NAME", "pod-a",
+                "GIT_SHA", "abc1234",
                 "APP_TITLE", "Cluster Dashboard",
                 "ACCENT_COLOR", "#123abc",
                 "CLOUD_NAME", "Azure AKS"
@@ -44,6 +45,7 @@ class KubernetesStatusServiceTest {
 
         assertTrue(result.apiAvailable());
         assertTrue(result.deploymentFound());
+        assertEquals("abc1234", result.gitSha());
         assertEquals(new KubernetesStatus.ReplicaCounts(3, 2, 1), result.replicas());
         assertEquals("build-42", result.imageTag());
         assertEquals("Azure AKS", result.cloudName());
